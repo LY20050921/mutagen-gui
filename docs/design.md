@@ -8,7 +8,8 @@
 > **v0.4 变更**：新增 **6.6 UI 设计规范**（配色对标 SSHFS-Win Manager）、**6.7 空状态**、**F8~F12**；补充 conda 开发环境；新增**附录 D 复查记录**  
 > **v0.5 变更**：两项决策定稿 —— **连接区采用 SSH 别名优先**（6.3）、**一个 yml 只支持一个同步会话（方案 A）**（附录 D.2）  
 > **v0.6 变更**：新增 **3.6 会话状态机**（状态定义 / status 映射 / Mermaid 转移图 / 转移表 / 按钮矩阵 / 实现约定）；F2 的按钮规则收敛为对 3.6 的引用；修正「有 `lastError` 就显示已停止」的标签错误  
-> **v0.7 变更**：新增 **残留锁文件**（`<yml>.lock`）的识别与两道防线 —— 实测确认**同步运行时关机/重启**就会触发，导致 `project start` 永久报 `already running`；F11.7/F11.8 加入状态残留标记与徽章优先级；7.4 加入「终止一律走 `project terminate`」铁律
+> **v0.7 变更**：新增 **残留锁文件**（`<yml>.lock`）的识别与两道防线 —— 实测确认**同步运行时关机/重启**就会触发，导致 `project start` 永久报 `already running`；F11.7/F11.8 加入状态残留标记与徽章优先级；7.4 加入「终止一律走 `project terminate`」铁律  
+> **v0.8 变更**：新增 **附录 C.5**（`ignore.vcs` 实测：内置名单 5 个、**不含 CVS**、Mutagen 默认与 GUI 默认相反）与 **F9.3 落地**（ssh 报错中文化）；新增 `selftest` 的字段默认值断言
 
 ---
 
@@ -984,7 +985,7 @@ commands:                # 自定义命令，用 mutagen project run <名称> �
 | `symlink.mode` | 枚举 | `ignore` / `portable` / `posix-raw` | ❌ **实测禁止** |
 | `watch.mode` | 枚举 | `portable` / `force-poll` / `no-watch` | ✅ |
 | `watch.pollingInterval` | 整数（秒） | — | ✅ |
-| `ignore.vcs` | 布尔 | 是否忽略 VCS 目录 | ❌ |
+| `ignore.vcs` | 布尔 | 是否忽略 VCS 目录。实测内置名单**只有 5 个**：`.git` / `.svn` / `.hg` / `.bzr` / `_darcs`；⚠️ **`CVS` 不在名单里**（照常同步）。**不写此字段时 Mutagen 默认为「不忽略」**，而 GUI 默认写 `true`（忽略）——**有意相反**，理由见 C.5 | ❌ |
 | `ignore.syntax` | 枚举 | `mutagen` / `docker` | ❌ |
 | `ignore.paths` | **字符串列表** | 忽略模式；`/` 开头锚定根目录，支持 `!` 取反 | ❌ |
 | `permissions.mode` | 枚举 | `portable` / `manual` | ❌ |
@@ -1042,6 +1043,32 @@ commands:
 > 对照当前正在使用的 `D:\code\mutagen.yml`：那份配置里的字段（`mode`、`flushOnCreate`、
 > `ignore.vcs`、`ignore.paths`、`symlink.mode`、`ignore.paths` 里的 `checkpoints` 等）
 > **全部在本文档的合法清单内**，说明现有配置完全符合 GUI 的生成规范，双向互操作可行。
+
+---
+
+### C.5 `ignore.vcs` 实测结论（容易踩的细节）
+
+| 结论 | 依据（Mutagen 0.18.1 实测） |
+|---|---|
+| 内置忽略**只有 5 个**目录：`.git` / `.svn` / `.hg` / `.bzr` / `_darcs` | 本地建 6 种 VCS 目录做 `vcs: true` 同步，只有这 5 个没传过去 |
+| ⚠️ **`CVS` 不在名单里** | 同上：`vcs: true` 时 `CVS/Entries` 照常同步到对端 |
+| **不写此字段时 Mutagen 默认「不忽略」** | 没有该字段的会话跑完 → 对端出现了 `.git/config` |
+| GUI 默认写 `true`（忽略），**有意与 Mutagen 相反** | 理由见下 |
+
+**为什么 GUI 要有意反着来**：同步 `.git` 要付三重代价 ——
+
+1. 首次要传**整个对象库**（实测：用户自己的仓库光 `git/objects/pack/*.pack` 就 **692 MB**）
+2. 每次 `git gc` 会重打包成新文件 → 那个大文件**重新传一遍**
+3. 两端同时 `commit` 会冲突（见下）
+
+**`vcs: false` 的双端风险（务必知道）**：`two-way-resolved` 模式下冲突时
+**alpha（本地）胜出**。若本地和远端各自 `git commit`，`.git/refs/heads/*` 会冲突
+→ 本地覆盖远端 → 远端那次提交看起来"消失"（对象可能还在，但分支指向丢了）。
+
+> **结论：git 操作只在一端做。** 推荐都在本地 commit、远端只 `pull`。
+
+> 这两条实测已落成 `selftest` 断言（`test_schema_decisions`），
+> 防止以后有人"顺手"把 GUI 默认改回 `false`。
 
 ---
 

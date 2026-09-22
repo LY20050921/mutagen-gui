@@ -195,53 +195,136 @@ def _run_ssh(alias: str, remote_args: list[str], timeout: int) -> tuple[bool, st
     return False, message or f"ssh 返回码 {completed.returncode}"
 
 
-def test_connection(alias: str, timeout: int = config.SSH_PROBE_TIMEOUT_SEC) -> tuple[bool, str]:
+#: 常见 ssh 失败 -> 「一行中文说明」。键是 ssh 原始报错里的小写特征串。
+#:
+#: 实测动机：直接把 ssh 的英文原文丢给用户，用户看不懂
+#: （真被问过「Host key verification failed 是什么意思」），
+#: 而且下面这几种失败的**处理办法完全不同**，混在一起只会让人瞎试。
+#:
+#: ``{alias}`` 会替换成当前测试的别名，方便用户直接复制命令去执行。
+_SSH_ERROR_HINTS: tuple[tuple[str, str], ...] = (
+    (
+        "host key verification failed",
+        "未接受过该服务器指纹 · 先在终端执行 ssh {alias} 并输入 yes",
+    ),
+    (
+        "connection refused",
+        "端口没有服务在监听 · 实例可能已关机/释放，或端口已变",
+    ),
+    (
+        "permission denied",
+        "认证被拒绝 · 检查该别名的 IdentityFile 私钥与服务器上的公钥",
+    ),
+    (
+        "no such identity",
+        "找不到私钥文件 · 检查该别名的 IdentityFile 路径",
+    ),
+    (
+        "could not resolve hostname",
+        "域名解析失败 · 检查网络或该别名的 HostName",
+    ),
+    (
+        "connection timed out",
+        "连接超时 · 确认服务器可达、端口开放",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    """一次连通性测试的结果。"""
+
+    ok: bool
+
+    summary: str
+    """一行以内的说明，用于界面上的状态标签。"""
+
+    detail: str = ""
+    """完整说明（含 ssh 原始报错），用于 tooltip。"""
+
+    def __str__(self) -> str:  # pragma: no cover - 仅为打印方便
+        return self.summary
+
+
+def diagnose_ssh_failure(raw: str, alias: str = "") -> tuple[str, str]:
+    """把 ssh 的英文报错拆成 ``(一行中文说明, 完整说明)``。
+
+    **原始报错始终保留**在完整说明里：需求 F12.4 要求不得吞掉真实输出，
+    用户也可能需要拿它去搜索。
+
+    :param raw: ssh 的原始 stderr。
+    :param alias: 当前测试的别名，用于拼出可直接执行的命令。
+    """
+    raw = raw.strip()
+    headline = raw.splitlines()[0] if raw else "ssh 执行失败"
+
+    lowered = raw.lower()
+    for keyword, summary in _SSH_ERROR_HINTS:
+        if keyword in lowered:
+            return summary.replace("{alias}", alias or "<别名>"), raw
+    return headline, raw
+
+
+def test_connection(alias: str, timeout: int = config.SSH_PROBE_TIMEOUT_SEC) -> ProbeResult:
     """检查 SSH 别名是否可达。"""
     if not alias:
-        return False, "请先选择 SSH 别名"
-    ok, message = _run_ssh(alias, ["echo", "mutagengui-ok"], timeout)
-    if ok and "mutagengui-ok" in message:
-        return True, "SSH 连接成功"
+        return ProbeResult(False, "请先选择 SSH 别名")
+
+    ok, raw = _run_ssh(alias, ["echo", "mutagengui-ok"], timeout)
     if ok:
-        return True, "SSH 连接成功"
-    return False, message
+        return ProbeResult(True, "SSH 连接成功")
+
+    summary, detail = diagnose_ssh_failure(raw, alias)
+    return ProbeResult(False, summary, detail)
 
 
 def test_remote_path(
     alias: str,
     remote_path: str,
     timeout: int = config.SSH_PROBE_TIMEOUT_SEC,
-) -> tuple[bool, str]:
+) -> ProbeResult:
     """检查远程路径是否存在且是目录。"""
     if not alias or not remote_path:
-        return False, "请先填写别名与远程路径"
-    ok, message = _run_ssh(alias, ["test", "-d", remote_path, "&&", "echo", "ok"], timeout)
+        return ProbeResult(False, "请先填写别名与远程路径")
+
+    ok, raw = _run_ssh(alias, ["test", "-d", remote_path, "&&", "echo", "ok"], timeout)
     if ok:
-        return True, "远程目录存在"
-    return False, message or f"远程目录不存在：{remote_path}"
+        return ProbeResult(True, "远程目录存在")
+
+    # 目录不存在时 ssh 只是返回非 0，**没有**任何输出 —— 这时别拿空串当说明
+    if not raw.strip():
+        return ProbeResult(False, f"远程目录不存在或不可访问：{remote_path}")
+
+    summary, detail = diagnose_ssh_failure(raw, alias)
+    return ProbeResult(False, summary, detail)
 
 
 def test_endpoint(
     alias: str,
     remote_path: str,
     timeout: int = config.SSH_PROBE_TIMEOUT_SEC,
-) -> tuple[bool, str]:
+) -> ProbeResult:
     """连接测试的完整流程：SSH 可达 → 远程目录存在（需求 F9.2）。"""
-    reachable, message = test_connection(alias, timeout)
-    if not reachable:
-        return False, message
+    reachable = test_connection(alias, timeout)
+    if not reachable.ok:
+        return reachable
 
-    exists, detail = test_remote_path(alias, remote_path, timeout)
-    if not exists:
-        return False, f"{message}；但{detail}"
-    return True, f"{message}，且{detail}"
+    path_result = test_remote_path(alias, remote_path, timeout)
+    if not path_result.ok:
+        return ProbeResult(
+            False, f"SSH 已连通，但{path_result.summary}", path_result.detail
+        )
+
+    return ProbeResult(True, f"{reachable.summary}，且{path_result.summary}")
 
 
 __all__ = [
     "SshHost",
+    "ProbeResult",
     "read_ssh_config",
     "list_aliases",
     "find_host",
+    "diagnose_ssh_failure",
     "test_connection",
     "test_remote_path",
     "test_endpoint",

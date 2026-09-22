@@ -67,7 +67,10 @@ def _split_beta(beta: str) -> tuple[str, str]:
 
 
 class _ProbeSignals(QObject):
-    finished = Signal(bool, str)
+    #: (是否成功, 界面摘要, 完整说明)。
+    #: 分开传是因为摘要要塞进**单行标签**，而完整说明（含 ssh 原始报错）
+    #: 得挂到 tooltip 上 —— 用户排查时确实需要看到原文，但标签放不下。
+    finished = Signal(bool, str, str)
 
 
 class _ProbeTask(QRunnable):
@@ -82,10 +85,10 @@ class _ProbeTask(QRunnable):
 
     def run(self) -> None:  # noqa: D102
         try:
-            ok, message = sshconfig.test_endpoint(self.alias, self.remote_path, self.timeout)
-        except Exception as exc:  # noqa: BLE001
-            ok, message = False, str(exc)
-        self.signals.finished.emit(ok, message)
+            result = sshconfig.test_endpoint(self.alias, self.remote_path, self.timeout)
+        except Exception as exc:  # noqa: BLE001 - 后台线程不能抛出去
+            result = sshconfig.ProbeResult(False, f"测试过程出错：{exc}", str(exc))
+        self.signals.finished.emit(result.ok, result.summary, result.detail)
 
 
 # --------------------------------------------------------------------------- #
@@ -876,11 +879,13 @@ class AddConnectionDialog(QDialog):
             self._on_probe_finished,
         )
 
-    def _on_probe_finished(self, ok: bool, message: str) -> None:
+    def _on_probe_finished(self, ok: bool, summary: str, detail: str = "") -> None:
         self._test_button.setEnabled(True)
-        self._set_test_status(ok, message)
+        self._set_test_status(ok, summary, detail)
 
-    def _set_test_status(self, ok: Optional[bool], message: str) -> None:
+    def _set_test_status(
+        self, ok: Optional[bool], message: str, detail: str = ""
+    ) -> None:
         color = theme.TEXT_SECONDARY
         prefix = ""
         if ok is True:
@@ -889,6 +894,9 @@ class AddConnectionDialog(QDialog):
             color, prefix = theme.DANGER, "✗ "
         self._test_status.setStyleSheet(f"color: {color}; background: transparent;")
         self._test_status.setText(prefix + message)
+        # 完整说明（含 ssh 原始报错）挂 tooltip：单行标签塞不下，
+        # 但排查时确实需要看到原文
+        self._test_status.setToolTip(detail)
 
     # ------------------------------------------------------------ 校验 --
 

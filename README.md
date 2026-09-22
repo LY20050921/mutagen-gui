@@ -159,6 +159,8 @@ cd D:\MutagenGUI
 | `cli` | 调用 mutagen | 统一处理 `CREATE_NO_WINDOW`、UTF-8、`-f` 参数 |
 | `parser` | 解析 `sync list` JSON | 容错：解析失败返回空列表，不影响其他实例 |
 | `registry` | `projects.json` | 原子写入；OS 文件锁实现单实例保护 |
+| `sshconfig` | 只读解析 `~/.ssh/config` + 连接测试 | **不修改**用户的 SSH 配置（写坏会导致所有远程连接失效）；ssh 报错翻译成「原因 + 怎么做」（`diagnose_ssh_failure`）|
+| `settings` | 用户偏好（`settings.json`）| 轮询间隔、默认 yml 目录、Mutagen 路径、SSH 别名 |
 | `console` | 控制台编码健壮性 | GBK 控制台下打印 `⚠` 会抛异常打断流程（实测踩过），统一改为 `errors="replace"` |
 
 ---
@@ -178,6 +180,9 @@ cd D:\MutagenGUI
 | 7 | Mutagen 在 Windows 上**不使用系统内置 OpenSSH** | 依赖 `MUTAGEN_SSH_PATH` |
 | 8 | `project start` 用 yml 旁的 **`<yml>.lock`** 判断「项目是否在运行」 | `sync terminate` 会留下残留锁 → 项目永久起不来。**终止必须用 `project terminate`**（见下节）|
 | 9 | `waiting-for-rescan` 是「出错但**在自动重试**」，不是「已停止」 | 与 `halted-on-error` 必须分开显示，否则误导用户去人工处理 |
+| 10 | `ignore.vcs` 内置忽略**只有 5 个**目录：`.git`/`.svn`/`.hg`/`.bzr`/`_darcs`，⚠️ **不含 `CVS`** | 用 CVS 的老项目得自己在 `ignore.paths` 里加 |
+| 11 | `ignore.vcs` **不写时 Mutagen 默认为「不忽略」**（`.git` 会同步），而 GUI 默认写 `true`（忽略）| **有意相反**。同步 `.git` 要付三重代价：首次传整个对象库、每次 `git gc` 重传 pack、两端同时 commit 互相覆盖。`selftest` 有断言钉住这个决定 |
+| 12 | ssh 失败**必须翻译**再给用户看 | 直接把 `Host key verification failed.` 丢出去用户看不懂（真被问过）。`diagnose_ssh_failure` 覆盖 6 类常见失败，各给不同处理办法；**原始报错保留在 tooltip** |
 
 > 修改 `schema.py` 后**必须重跑自检**第 5 步 —— 它就是这套字段清单的自动化回归测试。
 

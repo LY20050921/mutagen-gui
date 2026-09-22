@@ -618,6 +618,104 @@ def test_stale_lock_detection() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 6.7：ssh 报错中文化
+# --------------------------------------------------------------------------- #
+
+
+def test_ssh_error_diagnosis() -> None:
+    section("6.7 ssh 报错中文化")
+
+    def body() -> None:
+        from .sshconfig import diagnose_ssh_failure
+
+        # (ssh 原始报错, 期望出现的中文关键词, 别名)
+        cases = [
+            ("Host key verification failed.", "指纹", "trellis2"),
+            (
+                "ssh: connect to host x port 23984: Connection refused",
+                "端口",
+                "autodl",
+            ),
+            ("root@x: Permission denied (publickey).", "认证", "srv"),
+            (
+                "ssh: Could not resolve hostname nope: Name or service not known",
+                "解析",
+                "nope",
+            ),
+            (
+                "ssh: connect to host x port 22: Connection timed out",
+                "超时",
+                "srv",
+            ),
+        ]
+
+        for raw, keyword, alias in cases:
+            summary, detail = diagnose_ssh_failure(raw, alias)
+            headline = raw.splitlines()[0]
+            check(f"识别并给出中文说明（含「{keyword}」）", keyword in summary, summary)
+            check(f"原始报错未被吞掉：{headline[:40]}", headline in detail, detail)
+
+        # 别名要真的被替换进去，否则用户没法直接复制命令去执行
+        summary, _ = diagnose_ssh_failure("Host key verification failed.", "trellis2")
+        check("说明里已代入真实别名（可直接复制执行）", "trellis2" in summary, summary)
+
+        # 认不出来的报错 -> 原样返回第一行，不能凭空编中文
+        raw = "some totally unknown ssh failure"
+        summary, detail = diagnose_ssh_failure(raw, "srv")
+        check("无法识别的报错原样返回", summary == raw, summary)
+        check("无法识别时 detail 仍保留原文", detail == raw, detail)
+
+        # 空报错也不能给出空说明
+        summary, _ = diagnose_ssh_failure("", "srv")
+        check("空报错有兜底说明", bool(summary.strip()), repr(summary))
+
+    guard("ssh 报错中文化", body)
+
+
+# --------------------------------------------------------------------------- #
+# 6.8：字段默认值的有意选择
+# --------------------------------------------------------------------------- #
+
+
+def test_schema_decisions() -> None:
+    section("6.8 字段默认值（有意选择，勿无意改动）")
+
+    def body() -> None:
+        by_key = schema.SESSION_FIELDS_BY_KEY
+
+        # ⭐ ignore.vcs：GUI 默认「忽略」，**有意与 Mutagen 默认（不忽略）相反**。
+        #   理由见 schema.py 里该字段上方的长注释。这条断言就是把那个决定钉住：
+        #   如果有人顺手把它改成 False/None，这里会立刻红。
+        vcs = by_key["ignore.vcs"]
+        check("ignore.vcs 的 GUI 默认是「忽略」（有意与 Mutagen 默认相反）",
+              vcs.default is True, repr(vcs.default))
+        check("ignore.vcs 不允许端点级覆盖",
+              not vcs.endpoint_overridable)
+
+        # flushOnCreate / watch.mode 的默认值来自用户实际在用的配置，
+        # 改成别的会让新建实例的行为和既有实例不一致
+        check("flushOnCreate 默认 True（创建后立即完整同步）",
+              by_key["flushOnCreate"].default is True,
+              repr(by_key["flushOnCreate"].default))
+        check("watch.mode 默认 portable",
+              by_key["watch.mode"].default == "portable",
+              repr(by_key["watch.mode"].default))
+
+        # 默认值必须是合法取值，否则新建的 yml 会被 Mutagen 拒绝
+        bad: list[str] = []
+        for spec in schema.SESSION_FIELDS:
+            if spec.default is None:
+                continue
+            if spec.kind == schema.KIND_ENUM and spec.default not in spec.choices:
+                bad.append(f"{spec.key}={spec.default!r} 不在 {spec.choices}")
+            if spec.kind == schema.KIND_BOOL and not isinstance(spec.default, bool):
+                bad.append(f"{spec.key}={spec.default!r} 不是布尔")
+        check("所有非空默认值都合法", not bad, "; ".join(bad))
+
+    guard("字段默认值的有意选择", body)
+
+
+# --------------------------------------------------------------------------- #
 # 7：真实 Mutagen 严格解析
 # --------------------------------------------------------------------------- #
 
@@ -730,6 +828,8 @@ def main(argv: list[str] | None = None) -> int:
     test_status_classification()
     test_gui_states()
     test_stale_lock_detection()
+    test_ssh_error_diagnosis()
+    test_schema_decisions()
 
     workdir: Path | None = None
     if args.no_mutagen:

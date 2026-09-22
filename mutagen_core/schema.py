@@ -134,8 +134,19 @@ SESSION_FIELDS: tuple[FieldSpec, ...] = (
               "portable：可移植的监视；force-poll：强制轮询；no-watch：不监视"),
     FieldSpec("watch.pollingInterval", "轮询间隔（秒）", KIND_INT, (), True, None,
               "仅在轮询模式下有意义"),
+    # ⚠️ 实测（Mutagen 0.18.1）两个要点，改这个默认值前务必先读：
+    #
+    # ① 内置忽略名单只有 **5 个**：.git / .svn / .hg / .bzr / _darcs
+    #    —— **CVS 不在名单里**，无论这个字段怎么设，CVS 目录都会照常同步。
+    # ② **不写这个字段时，Mutagen 的默认是「不忽略」**（.git 会照常同步）。
+    #    而这里刻意把 GUI 默认设成 True（忽略），**有意与 Mutagen 默认相反**：
+    #    同步 .git 要付三重代价 —— 首次传整个对象库、每次 git gc 重传 pack、
+    #    两端同时 commit 会互相覆盖。对同步工具来说不划算。
+    #    selftest 有断言把这个决定钉住，避免以后被无意改掉。
     FieldSpec("ignore.vcs", "忽略版本控制目录", KIND_BOOL, (), False, True,
-              "忽略 .git / .svn 等目录"),
+              "勾选＝不同步 .git/.svn/.hg/.bzr/_darcs（CVS 不在内置名单里）；"
+              "取消＝连 .git 一起同步，远端也能用 git 命令，"
+              "但首次要传完整对象库，且两边同时 commit 有覆盖风险"),
     FieldSpec("ignore.syntax", "忽略规则语法", KIND_ENUM, IGNORE_SYNTAXES, False, "mutagen",
               "mutagen：Mutagen 语法；docker：Docker 风格的 .dockerignore 语法"),
     FieldSpec("ignore.paths", "忽略规则", KIND_LIST, (), False,
