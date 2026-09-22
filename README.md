@@ -4,7 +4,7 @@
 
 > **核心理念：一个 yml 文件 = 一个实例。所有操作都围绕 yml 文件进行。**
 
-需求文档见 [`requirements.md`](requirements.md)。
+设计文档见 [`docs/design.md`](docs/design.md)。
 
 ---
 
@@ -28,7 +28,8 @@
 
 ```
 MutagenGUI/
-├── requirements.md          # 需求文档（含实测字段白名单，附录 C）
+├── docs/
+│   └── design.md            # 设计文档（含实测字段白名单，附录 C）
 ├── README.md
 ├── requirements.txt         # Python 依赖
 ├── app.py                   # 程序入口
@@ -197,7 +198,7 @@ cd D:\MutagenGUI
 | `HALTED` | 出错**已停止**，不会自愈 | 是 | **需要**（点 Resume）|
 | `DISCONNECTED` | 已断开，不在重试 | 是 | 视情况 |
 
-**按钮矩阵**（完整版见 `requirements.md` 3.6）：
+**按钮矩阵**（完整版见 [`docs/design.md`](docs/design.md) 3.6）：
 
 ```
               Start  Stop  Restart  Monitor  Pause  Resume  Flush  List
