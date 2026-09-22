@@ -1,0 +1,7 @@
+# 运行时依赖
+PySide6>=6.6
+PyYAML>=6.0
+ruamel.yaml>=0.18
+
+# 开发 / 自检依赖（app.py --check 会用它做静态检查；缺失时跳过该检查）
+pyflakes>=3.2
