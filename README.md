@@ -371,6 +371,30 @@ mutagen project terminate -f <yml>      # 没有会话也能成功，并会删�
 | 表单未覆盖的 yml 字段 | 原样保留，不会被删除（`write_yaml` 只动它认识的键）|
 | 状态轮询失败 | 单次失败只影响状态栏提示，不影响列表与已有内容 |
 
+### 路径脱敏（截图分享时不泄露用户名）
+
+界面上**只读展示**的路径一律经 `config.display_path()` 折叠：
+
+| 原始 | 展示 |
+|---|---|
+| `C:\Users\somebody\.ssh\config` | `~/.ssh/config` |
+| `C:\Users\somebody\projects\foo` | `~/projects/foo` |
+| `C:\Users\someone_else\x` | `C:\Users\<user>\x` |
+| `D:\code\TRELLIS.2` | 原样（本来就不含用户名）|
+
+**为什么**：用户把界面截图贴出去（提 issue、写博客、发群）时，
+`C:\Users\<名字>\` 会把 Windows 用户名一起带出去。
+
+> ⚠️ **刻意不脱敏的两处**：
+>
+> 1. **可编辑的输入框**（Settings 的目录、Add Connection 的路径/yml 保存路径）
+>    必须是**真实路径** —— 否则用户一点保存就会把 `~` 写进 yml，路径直接失效
+> 2. **「复制路径」给的也是真实值** —— 那是拿去用的，不是拿去看的
+>
+> 所以截图时注意避开这两处。
+
+断言：`app.py --check` 的 `_check_path_masking`（8 条，含「真实 SSH 配置路径里不含用户名」）。
+
 ### 两道自检，缺一不可
 
 | 检查 | 覆盖什么 | 抓不到什么 |

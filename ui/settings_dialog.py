@@ -60,7 +60,7 @@ class SettingsDialog(QDialog):
         self._alias_edit.setPlaceholderText("例如 autodl")
         layout.addWidget(widgets.FieldBox(
             "默认 SSH 别名", self._alias_edit,
-            f"只读取，不修改：{config.SSH_CONFIG_PATH}",
+            f"只读取，不修改：{config.display_path(config.SSH_CONFIG_PATH)}",
         ))
 
         # 轮询间隔

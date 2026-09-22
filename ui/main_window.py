@@ -38,7 +38,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import APP_VERSION, MODE_DELETE, MODE_EDIT, MODE_NORMAL, SSH_CONFIG_PATH
+from config import (
+    APP_VERSION,
+    MODE_DELETE,
+    MODE_EDIT,
+    MODE_NORMAL,
+    SSH_CONFIG_PATH,
+    display_path,
+)
 from mutagen_core import template
 from mutagen_core.cli import MutagenCLI
 from mutagen_core.models import Project, SessionState
@@ -448,7 +455,7 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Warning)
         box.setText(f"实例「{project.name}」对应的 yml 文件找不到了。")
         box.setInformativeText(
-            f"期望路径：{project.yml_path}\n\n"
+            f"期望路径：{display_path(project.yml_path)}\n\n"
             "可能是文件被外部删除或移动了。\n"
             "注册表里仍然记着这个条目，但它对应的所有操作都无法执行。"
         )
@@ -643,7 +650,7 @@ class MainWindow(QMainWindow):
             "用图形界面管理多个 Mutagen 同步项目。<br>"
             "<b>一个 yml 文件 = 一个实例</b>，所有操作都围绕 yml 文件进行。<br><br>"
             f"Mutagen：{self._mutagen_version or '未知'}<br>"
-            f"SSH 配置：{SSH_CONFIG_PATH}<br>"
+            f"SSH 配置：{display_path(SSH_CONFIG_PATH)}<br>"
             "需求文档：requirements.md",
         )
 

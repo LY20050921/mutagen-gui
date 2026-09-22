@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import config
 from mutagen_core import template
 from mutagen_core.cli import MutagenCLI
 from mutagen_core.models import Project, SessionState
@@ -190,10 +191,12 @@ class InstanceDialog(QDialog):
         title_row.addStretch(1)
         layout.addLayout(title_row)
 
+        # 只读展示一律脱敏（把用户名折叠掉，见 config.display_path）；
+        # 「复制本地路径 / 远程端点」给的仍是真实值，所以不影响实际使用。
         for key, value in (
-            ("Alpha", self.project.alpha),
-            ("Beta", self.project.beta),
-            ("yml", self.project.yml_path),
+            ("Alpha", config.display_path(self.project.alpha)),
+            ("Beta", config.display_path(self.project.beta)),
+            ("yml", config.display_path(self.project.yml_path)),
         ):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
@@ -590,11 +593,11 @@ class InstanceDialog(QDialog):
 
     def _on_copy_alpha(self) -> None:
         QGuiApplication.clipboard().setText(self.project.alpha)
-        self._append_log(f"已复制本地路径：{self.project.alpha}")
+        self._append_log(f"已复制本地路径：{config.display_path(self.project.alpha)}")
 
     def _on_copy_beta(self) -> None:
         QGuiApplication.clipboard().setText(self.project.beta)
-        self._append_log(f"已复制远程端点：{self.project.beta}")
+        self._append_log(f"已复制远程端点：{config.display_path(self.project.beta)}")
 
     # -------------------------------------------------------- 监视进程 --
 
@@ -709,7 +712,7 @@ class InstanceDialog(QDialog):
         lock_path = Path(self.project.yml_path + ".lock")
         self._append_log(
             "判断结果：**没有**任何会话在跑 —— 是残留的锁文件在作怪。\n"
-            f"      锁文件：{lock_path}\n"
+            f"      锁文件：{config.display_path(lock_path)}\n"
             "      它本该在会话终止时被删除；会话若被绕过项目的方式终止"
             "（或 daemon 异常退出），就会留下来，\n"
             "      导致 `project start` 永远报 already running（重启 daemon 也无效）。"
@@ -720,7 +723,7 @@ class InstanceDialog(QDialog):
         box.setIcon(QMessageBox.Icon.Warning)
         box.setText("Mutagen 认为这个项目「已在运行」，但实际上一个会话都没有。")
         box.setInformativeText(
-            f"这是一份**残留的锁文件**造成的：\n{lock_path}\n\n"
+            f"这是一份**残留的锁文件**造成的：\n{config.display_path(lock_path)}\n\n"
             "起因：会话曾被绕过项目的方式终止（或 daemon 异常退出），"
             "锁文件没被清理。\n"
             "后果：`project start` 会一直报 already running，项目彻底起不来；"

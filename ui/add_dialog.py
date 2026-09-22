@@ -357,7 +357,7 @@ class AddConnectionDialog(QDialog):
         self._alias_combo.currentTextChanged.connect(self._refresh_ssh_details)
         self._register(
             "alias", "SSH 别名", self._alias_combo,
-            f"选项来自 {config.SSH_CONFIG_PATH}（只读取，不修改）",
+            f"选项来自 {config.display_path(config.SSH_CONFIG_PATH)}（只读取，不修改）",
         )
         layout.addWidget(self._field_boxes["alias"])
 

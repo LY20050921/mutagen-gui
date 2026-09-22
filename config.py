@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -134,6 +135,53 @@ SSH_PROBE_TIMEOUT_SEC = 5
 """连接测试的超时（需求 F9.2）。"""
 
 # --------------------------------------------------------------------------- #
+# 界面展示用的路径脱敏
+# --------------------------------------------------------------------------- #
+
+#: 匹配 ``C:\Users\<名字>`` 或 ``C:/Users/<名字>``（大小写不敏感）。
+_USER_PROFILE_RE = re.compile(r"^([A-Za-z]:)[\\/]Users[\\/][^\\/]+", re.IGNORECASE)
+
+
+def _mask_other_user(match: re.Match[str]) -> str:
+    """把别人主目录里的用户名折叠掉，保留盘符。"""
+    return f"{match.group(1)}\\Users\\<user>"
+
+
+def display_path(path: str | os.PathLike[str]) -> str:
+    """把路径折叠成**不含用户名**的形式，供界面展示。
+
+    为什么需要
+    ----------
+    界面上直接显示 ``C:\\Users\\<用户名>\\.ssh\\config`` 会把 Windows 用户名
+    一起带出去 —— 用户一旦截图分享（提 issue、写博客、贴到聊天里），
+    用户名就跟着泄露了。折叠成 ``~/.ssh/config`` 既更短也更通用。
+
+    规则
+    ----
+    1. 位于**当前用户主目录**下 → 折叠成 ``~/...``
+    2. 其它 ``C:\\Users\\<谁>\\...`` → 折叠成 ``C:\\Users\\<user>\\...``
+    3. 其余路径原样返回（本来就不含用户名，例如 ``D:\\code\\foo``）
+
+    .. warning::
+       **只用于只读展示。** 可编辑的输入框必须放**真实路径** ——
+       否则用户一点保存就会把 ``~`` 写进 yml，路径直接失效。
+    """
+    text = str(path)
+    if not text:
+        return text
+
+    try:
+        home = str(Path.home())
+    except (RuntimeError, OSError):  # pragma: no cover - 取不到家目录
+        home = ""
+
+    if home and text.lower().startswith(home.lower()):
+        rest = text[len(home):].lstrip("\\/")
+        return "~" if not rest else "~/" + rest.replace("\\", "/")
+
+    return _USER_PROFILE_RE.sub(_mask_other_user, text)
+
+# --------------------------------------------------------------------------- #
 # 编辑 yml 后对运行中会话的处理方式（需求 3.5）
 # --------------------------------------------------------------------------- #
 
@@ -179,6 +227,7 @@ __all__ = [
     "DEFAULT_SSH_ALIAS",
     "SSH_CONFIG_PATH",
     "SSH_PROBE_TIMEOUT_SEC",
+    "display_path",
     "PROMPT_RESTART",
     "PROMPT_SAVE_ONLY",
     "PROMPT_CANCEL",

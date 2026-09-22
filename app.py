@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -128,6 +129,83 @@ def _check_row_badges() -> None:
             f"{'OK' if ok else 'FAIL'} 实例行徽章[{label}] "
             f"实际={actual!r}，期望={expected!r}"
         )
+
+
+def _check_path_masking() -> None:
+    """检查路径脱敏：界面上不能再露出真实的 Windows 用户名。
+
+    实测动机：用户把界面截图贴出来时，``C:\\Users\\<用户名>\\.ssh\\config``
+    把 Windows 用户名一起带出去了。所以所有**只读展示**的路径都要走
+    :func:`config.display_path`（可编辑输入框除外 —— 那里必须是真实路径）。
+    """
+    from pathlib import Path
+
+    home = str(Path.home())
+    cases = [
+        # (原始路径, 期望的展示形式)
+        (home + r"\.ssh\config", "~/.ssh/config"),
+        (home + r"\projects\foo", "~/projects/foo"),
+        (home, "~"),
+        (r"C:\Users\someone_else\secret", r"C:\Users\<user>\secret"),
+        (r"D:\code\TRELLIS.2", r"D:\code\TRELLIS.2"),
+        ("autodl:/root/x", "autodl:/root/x"),
+        ("", ""),
+    ]
+
+    for raw, expected in cases:
+        actual = config.display_path(raw)
+        ok = actual == expected
+        shown = raw.replace(home, "~") if home else raw
+        print(
+            f"{'OK' if ok else 'FAIL'} 路径脱敏 {shown!r} -> {actual!r}"
+            + ("" if ok else f"，期望 {expected!r}")
+        )
+
+    # 最后一道：真实的 SSH 配置路径里不能残留用户名
+    masked = config.display_path(config.SSH_CONFIG_PATH)
+    username = Path.home().name
+    ok = bool(username) and username not in masked
+    print(f"{'OK' if ok else 'FAIL'} 真实 SSH 配置路径已脱敏：{masked}")
+
+
+def _check_no_username_leak() -> None:
+    """扫描**仓库文件**里有没有混入真实的 Windows 用户名。
+
+    为什么需要
+    ----------
+    实测踩过，而且是修「界面脱敏」时自己踩的：界面上的路径折叠好了，
+    可我在 **README 和代码注释**里顺手写了 ``C:\\Users\\<真实用户名>\\``
+    —— 界面不漏了，**文档反而漏到公开仓库里去了**。
+
+    所以脱敏必须**连文档和注释一起管**，这条检查就是那道闸。
+    """
+    from pathlib import Path
+
+    username = Path.home().name
+    if not username:
+        print("SKIP 用户名泄露扫描（取不到用户名）")
+        return
+
+    try:
+        # git grep 无匹配时返回码是 1，那不是错误 —— 只看 stdout
+        completed = subprocess.run(
+            ["git", "grep", "-i", "-n", "--", username],
+            cwd=str(config.APP_ROOT),
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"SKIP 用户名泄露扫描（{exc}）")
+        return
+
+    hits = (completed.stdout or "").strip()
+    if hits:
+        print("FAIL 仓库文件里出现了真实用户名（界面脱敏了，但文档/注释漏了）：")
+        print(hits.replace(username, "<用户名>"))  # 回显时也遮掉
+    else:
+        print("OK 用户名泄露扫描（仓库文件里没有真实用户名）")
 
 
 def _check_missing_yml(cli, settings) -> None:
@@ -449,6 +527,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             _check_static()
             _check_button_styles()
+            _check_path_masking()
+            _check_no_username_leak()
             _check_row_badges()
             _check_dialogs(cli, settings)
             _check_wheel_guard()

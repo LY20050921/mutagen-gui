@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import MODE_DELETE, MODE_EDIT
+from config import MODE_DELETE, MODE_EDIT, display_path
 from mutagen_core.models import Project, SessionState
 
 from . import icons, theme
@@ -630,7 +630,7 @@ class InstanceRow(QWidget):
             dot.setStyleSheet("background: transparent;")
             self._meta_layout.addWidget(dot, 0)
 
-            meta = QLabel(f"文件不存在：{self.project.yml_path}")
+            meta = QLabel(f"文件不存在：{display_path(self.project.yml_path)}")
             meta.setFont(theme.meta_font())
             meta.setStyleSheet(f"color: {theme.DANGER}; background: transparent;")
             meta.setToolTip(
@@ -743,7 +743,7 @@ class InstanceRow(QWidget):
                 theme.WARNING,
                 "Mutagen 认为这个项目「已在运行」，但实际上没有任何会话。\n\n"
                 "原因：yml 旁的锁文件没被清理\n"
-                f"  {self.project.yml_path}.lock\n\n"
+                f"  {display_path(self.project.yml_path)}.lock\n\n"
                 "后果：点 Start 会一直报 already running（重启 daemon 也没用）。\n"
                 "怎么来的：同步运行时关机 / 重启电脑，或 daemon 异常退出。\n\n"
                 "处理：点开这个实例后按 Start，界面会引导你一键清理。",
