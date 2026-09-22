@@ -39,18 +39,24 @@ def submit(
     :param on_finished: ``signals.finished`` 的槽
     :param on_failed: ``signals.failed`` 的槽（任务没有该信号时忽略）
     """
-    pending: set = getattr(owner, _PENDING_ATTR, None)
+    pending: Optional[set] = getattr(owner, _PENDING_ATTR, None)
     if pending is None:
         pending = set()
         setattr(owner, _PENDING_ATTR, pending)
 
     pending.add(task)
-    task.signals.finished.connect(on_finished)
-    task.signals.finished.connect(lambda *_: pending.discard(task))
 
-    if on_failed is not None and hasattr(task.signals, "failed"):
-        task.signals.failed.connect(on_failed)
-        task.signals.failed.connect(lambda *_: pending.discard(task))
+    # `QRunnable` 本身**没有** signals 属性 —— 那是 `PollTask` / `CommandTask`
+    # 这些子类各自挂上去的约定（见本模块开头）。用 getattr 取既符合实际，
+    # 也避免类型检查器因为 QRunnable 没声明它而报「属性未知」。
+    signals = getattr(task, "signals")
+
+    signals.finished.connect(on_finished)
+    signals.finished.connect(lambda *_: pending.discard(task))
+
+    if on_failed is not None and hasattr(signals, "failed"):
+        signals.failed.connect(on_failed)
+        signals.failed.connect(lambda *_: pending.discard(task))
 
     task.setAutoDelete(False)  # 所有权交给 Python，避免 C++ 侧提前析构
     QThreadPool.globalInstance().start(task)

@@ -11,12 +11,5 @@ yml_editor   双模式 yml 编辑器（查看 / 编辑）
 op_dialog    实例操作对话框（Mutagen 命令按钮 + 日志面板）
 """
 
-__all__ = [
-    "theme",
-    "icons",
-    "widgets",
-    "main_window",
-    "add_dialog",
-    "yml_editor",
-    "op_dialog",
-]
+# 同 mutagen_core/__init__.py：不写 __all__，模块清单看上面的 docstring。
+# 写 __all__ 只会让类型检查器逐个报「已在 __all__ 中指定，但在模块中不存在」。

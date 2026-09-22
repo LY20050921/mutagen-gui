@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QAbstractSpinBox,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QPushButton,
     QVBoxLayout,
@@ -70,7 +71,11 @@ class _WheelGuard(QObject):
     _HUNGRY = (QComboBox, QAbstractSpinBox)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: D102 - Qt 接口
-        if event.type() != QEvent.Type.Wheel:
+        # 用 isinstance 而不是 `event.type() == QEvent.Type.Wheel`：
+        # 后者不会让类型检查器把 event 收窄成 QWheelEvent，于是下面取
+        # angleDelta() 会被报「QEvent 没有该属性」。isinstance 一步到位，
+        # 运行时也更严谨。
+        if not isinstance(event, QWheelEvent):
             return False
         if not isinstance(obj, self._HUNGRY):
             return False
@@ -79,11 +84,10 @@ class _WheelGuard(QObject):
         if area is None:  # 不在滚动区域里，保持 Qt 默认行为
             return False
 
-        wheel = event  # type: ignore[assignment]
-        delta = wheel.angleDelta().y()
+        delta = event.angleDelta().y()
         bar = area.verticalScrollBar()
         if delta == 0 or bar.maximum() <= bar.minimum():
-            delta = wheel.angleDelta().x()
+            delta = event.angleDelta().x()
             bar = area.horizontalScrollBar()
         if delta == 0 or bar.maximum() <= bar.minimum():
             return False
@@ -91,7 +95,7 @@ class _WheelGuard(QObject):
         # 手感与 Qt 默认对齐：一个滚轮刻度（120）滚 3 行
         step = bar.singleStep() or 20
         bar.setValue(int(bar.value() - delta / 120.0 * step * 3))
-        wheel.accept()
+        event.accept()
         return True
 
 
@@ -271,6 +275,34 @@ def hint_label(text: str) -> QLabel:
     return label
 
 
+def layout_widget(layout: QLayout, index: int) -> QWidget | None:
+    """安全地取布局里第 ``index`` 个控件。
+
+    存在的理由很具体：``QLayout.itemAt()`` 的返回类型是 ``QLayoutItem | None``，
+    直接链式写 ``itemAt(i).widget()`` 会被 Pylance/pyright 报
+    「'widget' 不是 None 的已知属性」。这类判空散落在五六个地方，
+    集中到一个函数里，读代码的人也不用每处都推理一遍。
+    """
+    item = layout.itemAt(index)
+    return item.widget() if item is not None else None
+
+
+def clear_layout(layout: QLayout) -> None:
+    """清空布局里的所有控件（含 ``deleteLater``）。
+
+    和 :func:`layout_widget` 同理：``QLayout.takeAt()`` 也可能返回 ``None``。
+    取不到就直接 ``break`` —— 用 ``continue`` 会在极端情况下死循环。
+    """
+    while layout.count():
+        item = layout.takeAt(0)
+        if item is None:  # pragma: no cover - 上面已查 count，理论到不了
+            break
+        widget = item.widget()
+        if widget is not None:
+            widget.setParent(None)
+            widget.deleteLater()
+
+
 def hairline() -> QFrame:
     """1px 分隔线。"""
     line = QFrame()
@@ -395,7 +427,7 @@ class DynamicListEditor(QWidget):
         """返回非空行（空行会被丢弃，避免写出无意义的空条目）。"""
         result: list[str] = []
         for index in range(self._rows_layout.count()):
-            row = self._rows_layout.itemAt(index).widget()
+            row = layout_widget(self._rows_layout, index)
             if row is None:
                 continue
             edit = row.findChild(QLineEdit)
@@ -409,12 +441,7 @@ class DynamicListEditor(QWidget):
             self.add_row(str(value))
 
     def clear(self) -> None:
-        while self._rows_layout.count():
-            item = self._rows_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
-                widget.deleteLater()
+        clear_layout(self._rows_layout)
         self.changed.emit()
 
     def set_error(self, message: Optional[str]) -> None:
@@ -485,7 +512,7 @@ class KeyValueListEditor(QWidget):
     def values(self) -> dict[str, str]:
         result: dict[str, str] = {}
         for index in range(self._rows_layout.count()):
-            row = self._rows_layout.itemAt(index).widget()
+            row = layout_widget(self._rows_layout, index)
             if row is None:
                 continue
             edits = row.findChildren(QLineEdit)
@@ -499,12 +526,7 @@ class KeyValueListEditor(QWidget):
             self.add_row(str(key), str(value))
 
     def clear(self) -> None:
-        while self._rows_layout.count():
-            item = self._rows_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
-                widget.deleteLater()
+        clear_layout(self._rows_layout)
         self.changed.emit()
 
 
@@ -617,12 +639,7 @@ class InstanceRow(QWidget):
         yml 已丢失时改为显示「文件不存在：<路径>」——此时同步状态毫无意义，
         显示出来只会误导。
         """
-        while self._meta_layout.count():
-            item = self._meta_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
-                widget.deleteLater()
+        clear_layout(self._meta_layout)
 
         if self._missing:
             dot = QLabel()

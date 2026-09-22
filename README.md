@@ -395,13 +395,14 @@ mutagen project terminate -f <yml>      # 没有会话也能成功，并会删�
 
 断言：`app.py --check` 的 `_check_path_masking`（8 条，含「真实 SSH 配置路径里不含用户名」）。
 
-### 两道自检，缺一不可
+### 四道自检，缺一不可
 
 | 检查 | 覆盖什么 | 抓不到什么 |
 |---|---|---|
 | `python -m compileall` | 语法错误 | 拼错的名字、漏掉的导入 |
-| `python app.py --check` | **静态检查（pyflakes）** + 构建期错误 + 关键初始状态 | 运行期逻辑分支 |
+| `python app.py --check` | **静态检查（pyflakes）** + 构建期错误 + 关键初始状态 + 路径脱敏 + 用户名泄露扫描 | 运行期逻辑分支 |
 | `python -m mutagen_core.selftest` | 核心层逻辑 + **真实 Mutagen 严格解析** | UI 层 |
+| **类型检查（pyright）** | 类型/属性错误、漏判 `None`、PySide6 API 用法 | 逻辑正确性 |
 
 > **为什么必须做静态检查（pyflakes）**：`compileall` 只查语法，构建窗口也只走构造路径。
 > 实测踩过一次：`op_dialog.py` 里 `_offer_remote_offline()` 用了 `QMessageBox` 但**忘了导入**，
@@ -409,6 +410,30 @@ mutagen project terminate -f <yml>      # 没有会话也能成功，并会删�
 > 现在 `--check` 会先跑一遍 pyflakes，把这类问题挡在启动前。
 >
 > 没装 pyflakes 时会显示 `SKIP`（不影响其他检查）：`pip install pyflakes`
+
+**类型检查命令**（`pyright` 与 VS Code 的 Pylance 同源，结果一致）：
+
+```powershell
+& 'D:\miniconda3\envs\mutagen-gui\python.exe' -m pyright `
+    --pythonpath 'D:\miniconda3\envs\mutagen-gui\python.exe' `
+    app.py config.py mutagen_core ui
+```
+
+> ⚠️ **`--pythonpath` 不能省**：不带它，pyright 找不到 PySide6，会先把三行
+> `import PySide6.*` 报成 `reportMissingImports`，**真正的问题反而被淹没**。
+>
+> **基准：`0 errors, 0 warnings, 0 informations`。** 改动后请保持这个数字。
+
+**首次全量清理时修掉的几类问题**（44 错误 + 14 警告 → 0）：
+
+| 类别 | 典型写法 | 正确写法 |
+|---|---|---|
+| **一行引发 31 个错误** | `kwargs: dict[str, object]` 后 `subprocess.run(argv, **kwargs)` | 用 `dict[str, Any]` —— `object` 会与**每个**具名参数都不兼容 |
+| PySide6 存根缺口 | `process.setCreateProcessArgumentsModifier(...)`（存根里搜不到 `CreateProcess`）| 用 `getattr(process, "…", None)`，顺带完成「API 不存在就跳过」的降级 |
+| Qt 类型收窄 | `event.type() == QEvent.Type.Wheel` 后取 `angleDelta()` | 改 `isinstance(event, QWheelEvent)` —— 类型检查器才认 |
+| `QLayoutItem \| None` | `layout.itemAt(i).widget()` / `takeAt(0).widget()` | 走 `widgets.layout_widget()` / `widgets.clear_layout()`（已封装） |
+| `QByteArray` 转换 | `bytes(qba)` 或 `qba.data()`（后者可能是 `memoryview`，没有 `.decode`）| `bytes(qba.data())` —— 两步都做才既类型干净又运行正确 |
+| 冗余 `__all__` | `__init__.py` 里只列模块名却不导入 | 直接删掉（模块清单写在 docstring 里更有用）|
 
 ### ⭐ 一个容易混淆的区别：创建时 vs 运行中
 

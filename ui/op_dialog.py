@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from PySide6.QtCore import (
     QProcess,
@@ -334,7 +334,11 @@ class InstanceDialog(QDialog):
 
         if gui_state is GuiState.UNKNOWN:
             text, level = "读取中…", "stopped"
-        elif gui_state is GuiState.ABSENT:
+        elif gui_state is GuiState.ABSENT or state is None:
+            # ABSENT 是「读到了，但确实没有会话」。
+            # `state is None` 这半句看着多余（ABSENT 已经蕴含它），但值得写出来：
+            # ① 类型检查器不会替我们做这个推理，不写就报 reportOptionalMemberAccess
+            # ② 顺手说明「这里确实可能没有会话对象」，读代码的人不用去反推
             text, level = "未启动", "stopped"
         else:
             text, level = state.display_status, state.status_level
@@ -614,13 +618,23 @@ class InstanceDialog(QDialog):
         process.setProcessEnvironment(QProcessEnvironment.systemEnvironment())
 
         if os.name == "nt":  # pragma: no cover - 平台分支
-            try:
-                def _modifier(args) -> None:  # noqa: ANN001
+            # 让 Monitor 子进程不弹出控制台黑框。
+            #
+            # ⚠️ 这里刻意用 getattr 而不是 `process.setCreateProcessArgumentsModifier`：
+            # 这个 API 在 **PySide6 的类型存根里根本没有声明**（实测：QtCore.pyi 里
+            # 搜不到 `CreateProcess`），直接点属性会让 Pylance/pyright 报
+            # 「无法访问类 QProcess 的属性 setCreateProcessArgumentsModifier」。
+            # getattr 既绕开这个存根缺口，又天然完成了「该 API 不存在就跳过」的降级。
+            setter = getattr(process, "setCreateProcessArgumentsModifier", None)
+            if setter is not None:
+
+                def _modifier(args: Any) -> None:
                     args.flags |= _CREATE_NO_WINDOW
 
-                process.setCreateProcessArgumentsModifier(_modifier)
-            except (AttributeError, TypeError):
-                pass
+                try:
+                    setter(_modifier)
+                except TypeError:  # pragma: no cover - 换了 Qt 大版本导致参数形态变化
+                    pass
 
         process.readyReadStandardOutput.connect(self._read_monitor_output)
         process.finished.connect(self._on_monitor_finished)
@@ -632,7 +646,12 @@ class InstanceDialog(QDialog):
     def _read_monitor_output(self) -> None:
         if self._monitor is None:
             return
-        raw = bytes(self._monitor.readAllStandardOutput())
+        # 先 .data() 再 bytes()：
+        #   * 直接 bytes(QByteArray) 会被报「无法将 QByteArray 分配给 bytes 的 __new__」
+        #   * 只用 .data() 又会被报「memoryview 没有 decode 属性」
+        #     （存根把返回类型写成了 bytes | bytearray | memoryview）
+        # 两步合起来类型才干净，运行时也等价。
+        raw = bytes(self._monitor.readAllStandardOutput().data())
         text = raw.decode("utf-8", errors="replace")
         if text.strip():
             self._append_log(text)

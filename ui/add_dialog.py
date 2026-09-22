@@ -204,7 +204,7 @@ class EndpointOverrideEditor(QWidget):
     def values(self) -> dict[str, object]:
         result: dict[str, object] = {}
         for index in range(self._rows.count()):
-            widget = self._rows.itemAt(index).widget()
+            widget = widgets.layout_widget(self._rows, index)
             if isinstance(widget, _OverrideRow):
                 key = widget.key()
                 value = widget.value()

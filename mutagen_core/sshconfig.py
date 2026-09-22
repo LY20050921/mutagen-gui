@@ -15,6 +15,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import config
 
@@ -171,7 +172,11 @@ def _run_ssh(alias: str, remote_args: list[str], timeout: int) -> tuple[bool, st
         *remote_args,
     ]
 
-    kwargs: dict[str, object] = {
+    # ⚠️ 这里必须是 Any，不能是 object：
+    # `**kwargs` 展开时，`object` 会被类型检查器判成与 subprocess.run 的
+    # **每一个具名参数**都不兼容 —— 一行代码能报出三十条错（实测）。
+    # Any 才是「这些键值对应 run 的关键字参数」的正确表达。
+    kwargs: dict[str, Any] = {
         "capture_output": True,
         "encoding": "utf-8",
         "errors": "replace",

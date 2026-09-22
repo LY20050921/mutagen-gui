@@ -331,6 +331,9 @@ def _ruamel():
     缩进参数与 :class:`_IndentDumper` 保持一致，避免同一份配置在
     「合并写入」与「整份重建」两条路径下排版不同。
     """
+    # YAML 在没装 ruamel 时是 None；调用方（合并写入 / 另存为）都先查了
+    # HAVE_RUAMEL 才走到这里。这句断言把「不会为 None」告诉类型检查器。
+    assert YAML is not None, "ruamel.yaml 未安装"
     instance = YAML()
     instance.preserve_quotes = True
     instance.width = 4096

@@ -3,5 +3,8 @@ PySide6>=6.6
 PyYAML>=6.0
 ruamel.yaml>=0.18
 
-# 开发 / 自检依赖（app.py --check 会用它做静态检查；缺失时跳过该检查）
+# 开发 / 自检依赖
+#   pyflakes —— app.py --check 会用它做静态检查；缺失时该检查自动跳过
+#   pyright  —— 类型检查（与 VS Code 的 Pylance 同源）；用法见 README
 pyflakes>=3.2
+pyright>=1.1
