@@ -454,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
     from mutagen_core.cli import MutagenCLI
     from mutagen_core.registry import Registry, SingleInstanceLock
     from mutagen_core.settings import Settings
-    from ui import theme, widgets
+    from ui import icons, theme, widgets
     from ui.main_window import MainWindow
 
     def notify(title: str, text: str, *, critical: bool = False) -> None:
@@ -478,6 +478,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName(config.APP_NAME)
     app.setApplicationVersion(config.APP_VERSION)
     app.setOrganizationName(config.APP_NAME)
+    # 窗口 / 任务栏图标：运行时用 QPainter 画出来，exe 里因此不必携带图片资源
+    # （exe 自己的图标是另一回事，那个由 PyInstaller 嵌进资源段）。
+    app.setWindowIcon(icons.app_icon())
     theme.apply_theme(app)
 
     # Qt 的下拉框 / 数字框默认会「吃掉」滚轮事件来改自己的值，

@@ -16,7 +16,16 @@ from functools import lru_cache
 from typing import Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QIcon,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 
 _DEVICE_SCALE = 2
 
@@ -44,6 +53,34 @@ def _begin(size: int, color: str, width_ratio: float = 0.09) -> tuple[QPixmap, Q
 
 def _fill(painter: QPainter, path: QPainterPath) -> None:
     painter.fillPath(path, painter.pen().color())
+
+
+def _cloud_path(left: float, top: float, side: float) -> QPainterPath:
+    """云朵轮廓：3 个圆 + 1 个圆角矩形求**并集**。
+
+    ⚠️ **必须显式设成 ``WindingFill``**：``QPainterPath`` 默认是
+    ``OddEvenFill``（奇偶填充），几个圆的重叠区域会被**交替减掉**，
+    渲染出来像一朵**花瓣**而不是云。
+
+    实测踩过：小尺寸（列表行里 20px）下不容易察觉，
+    把它放大到 256px 做应用图标时一眼就看出来了。
+    ``simplified()`` **不会**替你纠正这一点——它会照奇偶规则把空洞固化下来，
+    所以填充规则要在**调用 simplified() 之前**就设好。
+    """
+    def rel(rx: float, ry: float, rw: float, rh: float) -> QRectF:
+        return QRectF(left + side * rx, top + side * ry, side * rw, side * rh)
+
+    combined = QPainterPath()
+    combined.setFillRule(Qt.FillRule.WindingFill)
+    combined.addEllipse(rel(0.08, 0.36, 0.40, 0.40))
+    combined.addEllipse(rel(0.28, 0.16, 0.48, 0.48))
+    combined.addEllipse(rel(0.52, 0.38, 0.38, 0.38))
+    combined.addRoundedRect(rel(0.08, 0.56, 0.82, 0.24), side * 0.12, side * 0.12)
+
+    # simplified() 去掉内部交线；将来若有人改成「描边」绘制它就有用了。
+    merged = combined.simplified()
+    merged.setFillRule(Qt.FillRule.WindingFill)
+    return merged
 
 
 # --------------------------------------------------------------------------- #
@@ -190,14 +227,8 @@ def _draw_link(p: QPainter, s: float) -> None:
 
 
 def _draw_cloud(p: QPainter, s: float) -> None:
-    """实心云朵轮廓（用合并路径去掉内部交线）。"""
-    combined = QPainterPath()
-    combined.addEllipse(QRectF(s * 0.08, s * 0.36, s * 0.40, s * 0.40))
-    combined.addEllipse(QRectF(s * 0.28, s * 0.16, s * 0.48, s * 0.48))
-    combined.addEllipse(QRectF(s * 0.52, s * 0.38, s * 0.38, s * 0.38))
-    base = QRectF(s * 0.08, s * 0.56, s * 0.82, s * 0.24)
-    combined.addRoundedRect(base, s * 0.12, s * 0.12)
-    _fill(p, combined.simplified())
+    """实心云朵轮廓。"""
+    _fill(p, _cloud_path(0.0, 0.0, s))
 
 
 def _draw_check(p: QPainter, s: float) -> None:
@@ -243,6 +274,85 @@ _DRAWERS: dict[str, Callable[[QPainter, float], None]] = {
 }
 
 ICON_NAMES: tuple[str, ...] = tuple(_DRAWERS)
+
+
+# --------------------------------------------------------------------------- #
+# 应用图标（窗口 / 任务栏 / exe）
+# --------------------------------------------------------------------------- #
+
+
+def _app_body_path(size: float) -> QPainterPath:
+    """应用图标的圆角方形底（圆角比例对齐 Windows 11 图标的观感）。"""
+    margin = size * 0.045
+    path = QPainterPath()
+    path.addRoundedRect(
+        QRectF(margin, margin, size - margin * 2, size - margin * 2),
+        size * 0.225,
+        size * 0.225,
+    )
+    return path
+
+
+def _app_cloud_path(size: float) -> QPainterPath:
+    """应用图标里的云朵（与实例列表的云图标同一形状，只是摆位不同）。
+
+    云朵的自然包围盒落在相对坐标 ``x∈[0.08,0.90] y∈[0.16,0.80]``，
+    所以先把绘制方框放大到 ``0.73 × size``，再把它的**视觉中心**
+    对准画布中心，最后略微上移做视觉配重（不然云会显得往下坠）。
+    """
+    side = size * 0.73              # 云朵绘制方框的边长
+    center = size / 2
+    left = center - 0.49 * side     # 0.49 = 包围盒中心 x
+    top = center - 0.48 * side - size * 0.02
+    return _cloud_path(left, top, side)
+
+
+@lru_cache(maxsize=32)
+def app_icon_pixmap(size: int = 256) -> QPixmap:
+    """应用图标位图，正好 ``size × size`` 像素（``devicePixelRatio = 1``）。
+
+    内部按 4 倍超采样再缩回来：16px 那种小尺寸下，圆角与云朵边缘才不会毛糙。
+    打包 exe 时用它生成 ``.ico``（见 ``tools/make_icon.py``）。
+    """
+    from . import theme
+
+    factor = 4
+    canvas = float(size * factor)
+
+    source = QPixmap(size * factor, size * factor)
+    source.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(source)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+    gradient = QLinearGradient(0.0, 0.0, canvas, canvas)
+    gradient.setColorAt(0.0, QColor(theme.ACCENT_HOVER))
+    gradient.setColorAt(1.0, QColor(theme.ACCENT_PRESSED))
+    painter.fillPath(_app_body_path(canvas), QBrush(gradient))
+
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#FFFFFF"))
+    painter.drawPath(_app_cloud_path(canvas))
+    painter.end()
+
+    return source.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+
+def app_icon() -> QIcon:
+    """应用图标（多尺寸），供窗口 / 任务栏使用。
+
+    刻意在**运行时**画出来、而不是读图片文件：这样 exe 里不必携带任何图片资源，
+    与本模块其余图标保持一致（见模块开头说明）。
+    """
+    result = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        result.addPixmap(app_icon_pixmap(size))
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -302,4 +412,12 @@ def ringed_dot(color: str, size: int = 12, ring: str = "#00000000") -> QPixmap:
     return pixmap_
 
 
-__all__ = ["icon", "pixmap", "status_dot", "ringed_dot", "ICON_NAMES"]
+__all__ = [
+    "icon",
+    "pixmap",
+    "status_dot",
+    "ringed_dot",
+    "app_icon",
+    "app_icon_pixmap",
+    "ICON_NAMES",
+]

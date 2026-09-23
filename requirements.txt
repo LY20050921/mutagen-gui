@@ -4,7 +4,9 @@ PyYAML>=6.0
 ruamel.yaml>=0.18
 
 # 开发 / 自检依赖
-#   pyflakes —— app.py --check 会用它做静态检查；缺失时该检查自动跳过
-#   pyright  —— 类型检查（与 VS Code 的 Pylance 同源）；用法见 README
+#   pyflakes   —— app.py --check 会用它做静态检查；缺失时该检查自动跳过
+#   pyright    —— 类型检查（与 VS Code 的 Pylance 同源）；用法见 README
+#   pyinstaller—— 打包成 exe；用法见 tools/build_exe.py
 pyflakes>=3.2
 pyright>=1.1
+pyinstaller>=6.10

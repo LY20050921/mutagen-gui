@@ -16,13 +16,36 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 
 APP_NAME = "MutagenGUI"
 APP_VERSION = "0.1.0"
 
-APP_ROOT = Path(__file__).resolve().parent
-"""项目根目录（本仓库所在目录）。"""
+
+def _app_root() -> Path:
+    """程序根目录（``.config`` / ``ymls`` / ``logs`` 都放在它下面）。
+
+    ⚠️ 打包成 exe 后**不能**再用 ``__file__``：
+
+    PyInstaller 的 onefile 模式会把整个程序解压到一个**临时目录**
+    （``sys._MEIPASS``），``__file__`` 就指向那里，而该目录**进程退出即删除**
+    —— 配置写在那儿等于没写，下次启动全部丢失。
+
+    所以冻结后改用 **exe 所在目录**，保持原有的「便携式布局」：
+    整个程序文件夹拷走，配置跟着走。
+
+    .. note::
+       想把配置放到别处（例如不想让程序目录被写），设置环境变量
+       ``MUTAGENGUI_CONFIG_DIR`` 即可（见 :func:`_config_dir`）。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+APP_ROOT = _app_root()
+"""程序根目录：源码运行时是本仓库目录，打包后是 exe 所在目录。"""
 
 # --------------------------------------------------------------------------- #
 # 目录

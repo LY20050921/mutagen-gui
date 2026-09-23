@@ -9,7 +9,8 @@
 > **v0.5 变更**：两项决策定稿 —— **连接区采用 SSH 别名优先**（6.3）、**一个 yml 只支持一个同步会话（方案 A）**（附录 D.2）  
 > **v0.6 变更**：新增 **3.6 会话状态机**（状态定义 / status 映射 / Mermaid 转移图 / 转移表 / 按钮矩阵 / 实现约定）；F2 的按钮规则收敛为对 3.6 的引用；修正「有 `lastError` 就显示已停止」的标签错误  
 > **v0.7 变更**：新增 **残留锁文件**（`<yml>.lock`）的识别与两道防线 —— 实测确认**同步运行时关机/重启**就会触发，导致 `project start` 永久报 `already running`；F11.7/F11.8 加入状态残留标记与徽章优先级；7.4 加入「终止一律走 `project terminate`」铁律  
-> **v0.8 变更**：新增 **附录 C.5**（`ignore.vcs` 实测：内置名单 5 个、**不含 CVS**、Mutagen 默认与 GUI 默认相反）与 **F9.3 落地**（ssh 报错中文化）；新增 `selftest` 的字段默认值断言
+> **v0.8 变更**：新增 **附录 C.5**（`ignore.vcs` 实测：内置名单 5 个、**不含 CVS**、Mutagen 默认与 GUI 默认相反）与 **F9.3 落地**（ssh 报错中文化）；新增 `selftest` 的字段默认值断言  
+> **v0.9 变更**：新增 **7.5 打包与分发**（PyInstaller 配方、冻结后根目录、C 动态库裁剪、代码定义图标）；F11.9 路径脱敏；修掉云朵图标的 **OddEvenFill** 渲染 bug
 
 ---
 
@@ -769,10 +770,17 @@ MutagenGUI/
 │   ├── op_dialog.py       # 实例操作对话框（Mutagen 命令按钮）
 │   ├── yml_editor.py      # 双模式 yml 编辑器
 │   └── widgets.py         # 复用组件（状态徽章等）
-├── app.py                 # 程序入口
-├── config.py              # 默认值（默认 yml 目录、ignore 模板等）
+├── app.py                 # 程序入口（也含 --check 自检入口）
+├── config.py              # 全局默认值与路径（含打包后的根目录处理）
+├── MutagenGUI.spec        # PyInstaller 打包配方（手写，属源码）
 ├── requirements.txt
-└── README.md
+├── README.md
+├── assets/                # 打包用图标（tools/make_icon.py 生成，不入版本库）
+├── tools/                 # 构建辅助脚本
+│   ├── make_icon.py       #   把代码画的应用图标渲染成 .ico
+│   └── build_exe.py       #   一键打包 / 实测 / 装快捷方式（需求 7.5）
+└── docs/
+    └── design.md          # 设计文档（本文件的公开版）
 ```
 
 ### 7.3 数据模型
@@ -813,6 +821,54 @@ class Project:
 - `subprocess.run(..., encoding='utf-8', errors='replace', creationflags=CREATE_NO_WINDOW)`
 - 环境变量强制注入：`MUTAGEN_SSH_PATH`、`PATH`（含 Mutagen.exe 所在目录）
 - 统一返回 `Result(ok, stdout, stderr, exit_code)`
+
+---
+
+### 7.5 打包与分发（PyInstaller）
+
+| 事项 | 约定 |
+|---|---|
+| 一键脚本 | `python tools/build_exe.py [--verify] [--shortcut] [--install-to DIR] [--copy-config]` |
+| 配方 | `MutagenGUI.spec`（手写，属源码，进版本库）|
+| 产物 | `dist/MutagenGUI/` **整个文件夹**（约 97 MB）；⚠️ **exe 不能单独拷走** |
+| 图标 | 形状由代码画（`ui/icons.py::app_icon_pixmap`）；构建时 `tools/make_icon.py` 渲染成 `assets/icon.ico` 供 PyInstaller 嵌入。运行时零图片依赖 |
+| 实测 | `--verify`：启动 exe 并核对**主窗口标题**——只判「进程活着」不够，GUI 崩溃会弹 traceback 对话框而进程**依然活着** |
+
+> **构建脚本用 Python 而不是 PowerShell 写**：PowerShell 5.1 会把没有 BOM 的
+> `.ps1` 按 ANSI/GBK 解读，脚本里的中文会直接乱码并破坏语法（实测踩过）。
+
+#### 7.5.1 ⚠️ 冻结后根目录必须换成 exe 所在目录
+
+`config._app_root()`：未冻结时用 `__file__`（源码树），冻结后（`sys.frozen`）
+改用 `sys.executable` 所在目录。
+
+**为什么**：PyInstaller 会把程序解压到临时目录，`__file__` 就指向那里，
+而该目录**进程退出即删除**——配置写在那儿等于没写，下次启动全部丢失。
+换成 exe 目录同时也保住了「便携式布局」：整个程序文件夹拷走，配置跟着走。
+
+> 实测验证：`dist\MutagenGUI\.config\app.lock` 出现在 exe 旁边 ✓
+
+想放到别处可用环境变量 `MUTAGENGUI_CONFIG_DIR` 覆盖。
+
+#### 7.5.2 ⚠️ `excludes` 管不到 C 动态库
+
+PyInstaller 的 `excludes` 只过滤 **Python 模块**。PySide6 的钩子会把整包 Qt
+动态库都收进来（Quick / Qml / Pdf / OpenGL 等合计二十多 MB），
+必须在 spec 里**从 `a.binaries` 按文件名剔除**（116 MB → 97 MB）。
+
+**裁错会启动即崩**，所以每次改动这个列表都必须真的运行一次 exe——
+这正是 `--verify` 的用途。
+
+#### 7.5.3 图标：形状由代码定义
+
+应用图标（圆角蓝底渐变 + 白色云朵）由 `ui/icons.py::app_icon_pixmap()` 用 QPainter 画，
+**运行时不读任何图片**；`tools/make_icon.py` 只是把同一份绘图渲染成多尺寸 PNG
+再打包成 `.ico`（不依赖 Pillow——Vista 之后的 `.ico` 可直接内嵌 PNG）。
+
+> 画这个图标时发现并修掉一个真 bug：`QPainterPath` 默认 **OddEvenFill**，
+> 云朵那几个形状的重叠区会被**交替挖空**（渲染成花瓣）。列表行 20px 下看不出来，
+> 放大到 256px 一眼现形。现在统一走 `icons._cloud_path()` 并显式设 `WindingFill`；
+> 注意 `simplified()` **不纠正**这一点，填充规则必须在它**之前**设好。
 
 ---
 
@@ -908,6 +964,9 @@ class Project:
 - [ ] 残留锁能被**主动标记**在列表行上（不必等点 Start 才发现）
 - [ ] 徽章优先级正确：文件丢失 > 状态残留 > 多会话只读
 - [ ] 控制台输出含 `⚠` 等字符时**不会崩溃**（GBK 环境）
+- [ ] 打包成 exe 后能启动，且**配置写在 exe 所在目录**（不会写到临时目录后丢失）
+- [ ] 应用图标正确显示在窗口标题栏、任务栏与 exe 文件上
+- [ ] `tools/build_exe.py --verify` 能把「进程活着但其实是崩溃对话框」判为失败
 - [ ] 列表支持搜索过滤、右键菜单、圆形快捷开关按钮
 - [ ] Monitor 可开始 / 停止，长驻进程不会重复启动
 - [ ] 配色与 SSHFS-Win Manager 一致（暗色底 + `#4A9EFF` 主色）

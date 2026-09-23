@@ -325,6 +325,50 @@ mutagen project terminate -f <yml>      # 没有会话也能成功，并会删�
 >
 > 本项目曾在「删除实例」流程里用了 `sync terminate` —— 已修。
 
+## 📦 打包成 exe
+
+```powershell
+python tools\build_exe.py --verify --shortcut
+```
+
+| 参数 | 作用 |
+|---|---|
+| （不加） | 只打包到 `dist\MutagenGUI\` |
+| `--verify` | 打包后**启动实测**：等主窗口标题出现才判定成功 |
+| `--shortcut` | 在桌面创建快捷方式 |
+| `--install-to D:\Apps\MutagenGUI` | 把结果整体拷到别处（推荐，别从 git 仓库里的 `dist/` 长期运行）|
+| `--copy-config` | 把当前 `.config` 的实例列表 / 设置一并带过去 |
+
+**产物**：`dist\MutagenGUI\` 整个文件夹约 **97 MB**（PySide6 的体量），其中 exe 自身只 2.2 MB。
+
+### ⚠️ exe 不能单独拷走
+
+PyInstaller 把 Python 解释器、Qt 动态库都放在同目录的 `_internal\` 里。
+**要用的是整个文件夹** —— 想放别处就整个搬（或用 `--install-to`），桌面上放**快捷方式**即可。
+
+> 附带好处：配置 `.config` / `ymls` / `logs` 会落在**这个文件夹里**（便携式布局），
+> 不会往 `%APPDATA%` 或桌面撒文件。
+
+### 为什么 `--verify` 不只看「进程还活着」
+
+Windows GUI 程序**崩溃时会弹一个 traceback 对话框，进程照样活着**。
+所以 `--verify` 会进一步核对**主窗口标题是不是程序名** —— 真窗口是，崩溃对话框不是。
+
+### 打包踩过的三个坑（都已处理）
+
+| 坑 | 说明 |
+|---|---|
+| **配置会写到临时目录然后丢失** | PyInstaller 会把程序解压到临时目录，`Path(__file__).parent` 就指向那里、**退出即删**。`config._app_root()` 在冻结后改用 **exe 所在目录**（实测验证：`dist\MutagenGUI\.config\app.lock` 出现在 exe 旁边 ✓）|
+| **图标不能依赖图片文件** | 形状由代码画（`ui/icons.py`），构建时 `tools/make_icon.py` 把它渲染成 `.ico` 给 PyInstaller 嵌进资源段。运行时零图片依赖，跨机器一致 |
+| **`excludes` 管不到 C 动态库** | PyInstaller 会把整包 Qt 收进来（Quick/Qml/Pdf 等二十多 MB）。spec 里按文件名从 `binaries` 里剔掉 → 116MB 降到 97MB。**裁错会启动即崩，所以每次都必须真跑一次**（这正是 `--verify` 的用途）|
+
+> **附带发现的一个真 bug**：`QPainterPath` 默认是 **OddEvenFill（奇偶填充）**，
+> 云朵那四个形状的重叠区会被**交替挖空**，渲染出来像花瓣。
+> 小尺寸（列表行 20px）下看不出来，放大到 256px 做应用图标时一眼就现形了。
+> 现在云朵统一走 `icons._cloud_path()` 并显式设 `WindingFill`。
+> 注意 `simplified()` **不会**纠正这一点——它会照奇偶规则把空洞固化下来，
+> 所以填充规则必须在调用它**之前**设好。
+
 ## 已定决策
 
 | 决策 | 结论 |
